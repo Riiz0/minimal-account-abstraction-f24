@@ -11,16 +11,34 @@ import {IEntryPoint} from "lib/account-abstraction/contracts/interfaces/IEntryPo
 
 contract MinimalAccount is IAccount, Ownable {
     error MinimalAccount__NotTheEntryPointContract();
+    error MinimalAccount__NotFromEntryPointOrOwner();
+    error MinimalAccount__CallFailed(bytes);
 
     IEntryPoint private immutable i_entryPoint;
+
+    modifier requireFromEntryPoint() {
+        require(msg.sender == address(i_entryPoint), MinimalAccount__NotTheEntryPointContract());
+        _;
+    }
+
+    modifier requireFromEntryPointOrOwner() {
+        if (msg.sender != address(i_entryPoint) && msg.sender != owner()) {
+            revert MinimalAccount__NotFromEntryPointOrOwner();
+        }
+        _;
+    }
 
     constructor(address entrypoint) Ownable(msg.sender) {
         i_entryPoint = IEntryPoint(entrypoint);
     }
 
-    modifier requireFromEntryPoint() {
-        require(msg.sender == address(i_entryPoint), MinimalAccount__NotTheEntryPointContract());
-        _;
+    receive() external payable {}
+
+    function execute(address dest, uint256 value, bytes calldata functionData) external {
+        (bool success, bytes memory result) = dest.call{value: value}(functionData);
+        if (!success) {
+            revert MinimalAccount__CallFailed(result);
+        }
     }
 
     //A signature is valid, if its the MinimalAccount owner

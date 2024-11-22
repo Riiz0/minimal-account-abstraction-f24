@@ -3,20 +3,46 @@ pragma solidity 0.8.26;
 
 import {Script} from "forge-std/Script.sol";
 import {PackedUserOperation} from "lib/account-abstraction/contracts/core/UserOperationLib.sol";
+import {HelperConfig} from "script/HelperConfig.s.sol";
+import {IEntryPoint} from "lib/account-abstraction/contracts/core/EntryPoint.sol";
+import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract SendPackedUserOp is Script {
+    using MessageHashUtils for bytes32;
+
     function run() public {}
 
-    function generateSignedUserOperation(bytes memory callData, address sender)
+    function generateSignedUserOperation(bytes memory callData, HelperConfig.NetworkConfig memory config)
         public
+        view
         returns (PackedUserOperation memory)
     {
-        uint256 nonce = vm.getNonce(sender);
-        PackedUserOperation memory unsignedUserOp = _generateUnsignedUserOperation(callData, sender, nonce);
+        // 1. Generate the unsigned data
+        uint256 nonce = vm.getNonce(config.account);
+        PackedUserOperation memory userOp = _generateUnsignedUserOperation(callData, config.account, nonce);
+
+        // 2. Get the UserOp Hash
+        bytes32 userOpHash = IEntryPoint(config.entryPoint).getUserOpHash(userOp);
+        bytes32 digest = userOpHash.toEthSignedMessageHash();
+
+        // 3. Sign it
+        uint8 v;
+        bytes32 r;
+        bytes32 s;
+        uint256 ANVIL_DEFAULT_KEY = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+
+        if (block.chainid == 31337) {
+            (v, r, s) = vm.sign(ANVIL_DEFAULT_KEY, digest);
+        } else {
+            (v, r, s) = vm.sign(config.account, digest);
+        }
+        userOp.signature = abi.encodePacked(r, s, v);
+        return userOp;
     }
 
     function _generateUnsignedUserOperation(bytes memory callData, address sender, uint256 nonce)
-        public
+        internal
+        pure
         returns (PackedUserOperation memory)
     {
         uint128 verificationGasLimit = 16777216;
